@@ -1,0 +1,802 @@
+---
+title: "Joint analysis of marginal and heterogeneous treatment effects: acupuncture trial"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Overview
+
+This document applies the nonparanormal framework for **joint estimation of marginal and heterogeneous treatment effects** to a publicly available randomized clinical trial on acupuncture for chronic headache (Vickers et al., 2004, *BMJ*, <https://doi.org/10.1136/bmj.38029.421863.EB>). The aim is to replicate the main findings of the original trial analysis and to illustrate how joint modeling of the outcome and baseline covariates can be used to assess prognostic and predictive covariate effects, while keeping the marginal treatment effect $\tau$ interpretable.
+
+The trial evaluated whether acupuncture reduces chronic headache burden compared to usual care. A total of $n = 401$ patients were randomized to acupuncture ($n = 205$) or usual care ($n = 196$). Randomization was minimized on:
+
+-   age,
+-   sex,
+-   headache diagnosis (migraine versus tension-type), and
+-   headache chronicity.
+
+The primary outcome was a patient-reported headache severity score (6-point Likert scale), measured four times per day over four weeks and summed up; this was assessed at both baseline (`pk1`) and 12 months after study entry (`pk5`).
+
+The main analysis of the original trial used an ANCOVA model adjusting for the baseline headache score and minimization covariates, restricted to the 301 complete cases after excluding 100 participants with missing follow-up data. The models presented here reproduce this analysis and progressively extend it by adjusting for prognostic and predictive covariate effects, incorporating all 401 observations, relaxing the normality assumption, and treating the outcome as ordinal.
+
+# Packages and data
+
+```{r packages}
+get_packages <- function(pkgs) {
+  rpkgs <- sapply(pkgs, require, character.only = TRUE)
+  if (!all(rpkgs)) sapply(pkgs[!rpkgs], install.packages)
+  rpkgs <- sapply(pkgs, require, character.only = TRUE)
+  if (!all(rpkgs)) stop("could not attach all required packages")
+}
+get_packages(c("tram", "multcomp", "lattice"))
+```
+
+```{r data, include=FALSE}
+df <-
+structure(list(group = structure(c(2L, 1L, 1L, 1L, 1L, 2L, 2L, 
+2L, 1L, 2L, 2L, 1L, 2L, 2L, 1L, 2L, 1L, 1L, 1L, 2L, 2L, 1L, 1L, 
+2L, 2L, 1L, 2L, 1L, 2L, 2L, 1L, 1L, 1L, 1L, 2L, 2L, 2L, 1L, 1L, 
+2L, 1L, 2L, 2L, 1L, 1L, 2L, 2L, 1L, 2L, 1L, 1L, 2L, 1L, 1L, 1L, 
+1L, 2L, 2L, 2L, 2L, 1L, 1L, 2L, 2L, 1L, 1L, 2L, 1L, 2L, 2L, 1L, 
+1L, 1L, 2L, 2L, 2L, 1L, 2L, 1L, 1L, 2L, 2L, 1L, 1L, 2L, 1L, 2L, 
+2L, 2L, 1L, 1L, 1L, 1L, 1L, 2L, 1L, 1L, 2L, 2L, 1L, 2L, 2L, 2L, 
+2L, 2L, 1L, 2L, 2L, 1L, 1L, 1L, 1L, 2L, 2L, 2L, 1L, 1L, 2L, 2L, 
+2L, 2L, 1L, 2L, 1L, 1L, 1L, 2L, 1L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 
+1L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 1L, 1L, 1L, 2L, 2L, 1L, 2L, 1L, 
+1L, 1L, 2L, 1L, 1L, 1L, 1L, 2L, 1L, 2L, 2L, 1L, 1L, 2L, 2L, 1L, 
+1L, 1L, 2L, 1L, 1L, 2L, 2L, 2L, 1L, 2L, 2L, 1L, 1L, 1L, 2L, 2L, 
+2L, 2L, 2L, 1L, 1L, 2L, 1L, 2L, 1L, 2L, 1L, 2L, 1L, 2L, 1L, 1L, 
+1L, 1L, 2L, 1L, 1L, 2L, 2L, 2L, 2L, 1L, 2L, 1L, 2L, 1L, 2L, 1L, 
+1L, 1L, 2L, 2L, 1L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 1L, 2L, 1L, 2L, 
+1L, 1L, 1L, 2L, 2L, 2L, 1L, 2L, 1L, 1L, 2L, 2L, 2L, 2L, 1L, 1L, 
+1L, 2L, 1L, 2L, 1L, 1L, 2L, 2L, 2L, 1L, 1L, 2L, 2L, 2L, 1L, 2L, 
+1L, 1L, 1L, 2L, 2L, 1L, 1L, 2L, 1L, 2L, 2L, 2L, 1L, 2L, 1L, 2L, 
+2L, 1L, 2L, 2L, 1L, 2L, 1L, 1L, 1L, 1L, 2L, 1L, 1L, 2L, 2L, 1L, 
+1L, 2L, 1L, 1L, 1L, 2L, 1L, 2L, 1L, 1L, 1L, 1L, 2L, 2L, 2L, 2L, 
+1L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 1L, 1L, 1L, 1L, 2L, 1L, 1L, 1L, 
+1L, 1L, 2L, 2L, 2L, 1L, 2L, 1L, 2L, 2L, 2L, 1L, 2L, 2L, 1L, 2L, 
+1L, 1L, 2L, 2L, 1L, 2L, 2L, 1L, 2L, 2L, 1L, 1L, 1L, 2L, 2L, 2L, 
+2L, 1L, 2L, 2L, 2L, 1L, 1L, 1L, 1L, 1L, 2L, 2L, 1L, 1L, 2L, 2L, 
+2L, 1L, 2L, 1L, 2L, 1L, 2L, 2L, 1L, 1L, 2L, 2L, 1L, 1L, 1L, 2L, 
+2L, 1L, 2L, 1L, 2L, 1L, 1L, 2L, 1L, 2L), levels = c("Control", 
+"Acupuncture"), class = "factor"), pk1 = c(10.75, 9.5, 16, 32.5, 
+16.5, 9.25, 42.5, 24.25, 21, 21.75, 14.5, 40.5, 11.75, 56.5, 
+11.75, 15.5, 33.25, 39.5, 20.5, 49.25, 9.75, 25, 26.25, 35.75, 
+59.75, 14.5, 48.75, 51.25, 19.75, 74.25, 43.75, 12.25, 19.25, 
+55.75, 23.5, 21, 19, 14.75, 10, 64.75, 13.5, 38.5, 17.5, 19.5, 
+31, 48, 45, 32.25, 26.25, 30, 21.25, 35, 24.75, 27.25, 8.75, 
+28.25, 31.25, 22.5, 8.75, 35.25, 13.75, 44.25, 33, 19, 19, 29, 
+9.75, 59.25, 19.5, 12, 65.25, 36.25, 22.25, 16.25, 29.75, 9.25, 
+19.5, 13.75, 67.5, 29.5, 21.25, 27, 42.5, 18.25, 13, 38.25, 32, 
+33.25, 10.25, 66.5, 15.75, 17.25, 16.25, 21.5, 37, 21, 23, 19.75, 
+12.25, 24, 32.25, 19.25, 9.75, 17, 37.25, 19.75, 10.75, 13.75, 
+35, 25.75, 29, 76.25, 39.25, 47, 43.25, 24, 9, 19.25, 50.75, 
+21.5, 36.5, 6.75, 18.25, 20.25, 32.25, 15, 74, 70.75, 23.75, 
+20.25, 35.75, 38.25, 19, 14.5, 58.5, 59, 30, 22.25, 21.25, 9.5, 
+48.5, 17, 13.75, 17.5, 10.75, 10.25, 41.25, 9.5, 16.25, 22, 24.75, 
+16.5, 42, 12.25, 37.75, 16.25, 12.5, 18.25, 19.75, 26.75, 76.5, 
+17.75, 13.5, 57.25, 11, 27.25, 28, 13.75, 19.5, 12.75, 40.5, 
+27, 15.75, 34.5, 20.75, 16.25, 15.25, 9.25, 11.75, 18.5, 18.5, 
+41.5, 19, 12.75, 22.5, 12.5, 13, 9.25, 13.25, 13, 14, 20, 17, 
+14.25, 17.75, 16.25, 12, 42.25, 19.25, 63.75, 9.25, 32.5, 36.25, 
+17.75, 77, 13.25, 11, 39, 38.5, 9.5, 12, 16.75, 9.75, 28.5, 10.25, 
+14.5, 31.75, 20.75, 45.5, 47.5, 8.75, 20, 15, 18.75, 11.5, 11.5, 
+24.75, 29, 11.25, 41.25, 18.75, 22.25, 11.5, 25.25, 14, 14.25, 
+14, 13.75, 21, 32.5, 11.25, 28.25, 16.5, 18.5, 17, 17, 35.5, 
+23.5, 34, 68.5, 15.25, 40.5, 16.25, 52.75, 21.75, 26.25, 18, 
+29.5, 47.75, 22.5, 16.25, 13, 9.75, 9.25, 21.25, 9.25, 18, 24.5, 
+25.75, 9.25, 20.5, 39.25, 24.75, 11, 31.5, 64.5, 44.5, 16, 61.75, 
+30, 31, 17.66667, 9.5, 18.25, 26.25, 17, 22.25, 9.25, 23.25, 
+11.75, 22.5, 57.75, 15, 9.5, 37, 58.25, 13.75, 70, 39.5, 16.5, 
+12.25, 24.75, 26.25, 8.75, 27.66667, 22.25, 40.25, 15.25, 9.5, 
+23, 31, 31.75, 64, 17.5, 20.25, 16.75, 9.25, 12.75, 16.5, 10, 
+27.5, 50.25, 53.75, 37.5, 9, 51, 36.75, 35, 16.75, 56, 37.25, 
+15, 16.25, 22.25, 75, 42, 20.75, 25.75, 15, 26.75, 12, 10, 16.25, 
+16, 38, 13.5, 19, 33.25, 87.5, 29, 18, 18.5, 32.25, 12.25, 23.25, 
+12.25, 22, 28.5, 26.75, 10, 53, 27, 26.5, 17.75, 28, 25.75, 94.75, 
+19, 18.75, 54.75, 14.5, 15.5, 31, 18.5, 35.5, 24.5, 60.5, 51.25, 
+55.666670000000003, 48.75, 9.25, 48.5, 34.25, 24.25, 14, 10.75, 
+36.25, 65.75, 19.5, 19, 17.25, 18, 53, 10.25, 17, 17.5, 21, 38.5, 
+29.75, 14.25, 11.75), pk5 = c(NA, NA, 15.33333, NA, 23.25, 6.25, 
+51.25, 25.25, 15.25, 1, 2.5, 28.75, 13.5, NA, NA, 2.75, 26.75, 
+40, 32.75, 19.5, 21.5, NA, NA, NA, 38, 12.5, NA, NA, 18.75, NA, 
+NA, 8.5, NA, 62.25, 9.75, 15.5, 9.25, 9.25, 6, 60, NA, 28.75, 
+23, 3.5, NA, 3.25, 73.733339999999998, 16.75, 6.25, 29.5, 13.75, 
+0.5, NA, 17, 12.75, NA, NA, 7.75, 1.25, NA, 5.5, 8.25, 5.5, 3, 
+8.25, NA, 4.75, 28.25, 11.75, 17, NA, 30.75, 16, 6.25, NA, 8, 
+8.25, 13.75, 79.75, NA, NA, 22.5, 44.75, 0.25, 7, NA, 15.25, 
+NA, 16.75, 29.75, 17.5, 13.75, 7.5, 15.75, 25.25, 26, 7.75, 9.5, 
+2.5, 11.75, 14.25, NA, 11.5, 9, 14.5, 27.25, NA, 7.25, NA, 15.75, 
+19.5, 64.5, 28.25, NA, 31, 20, 12.25, 27.5, 47.75, 24.25, NA, 
+12, 6.5, 25.25, 42.75, 18.75, 61.5, 75.25, 13.5, 15.5, 10.75, 
+20.75, 31.75, NA, 57.75, 43.75, NA, 6.25, 12.5, 9.5, 16.5, 17.75, 
+NA, 19, NA, 7.25, 15, 2.25, 11.5, 14.75, NA, 14, NA, NA, 28.75, 
+28.75, 25.75, 14.25, 12, 13, NA, 14.25, 13.5, 36.5, 3, 25, 14.75, 
+13.75, 17, 4, NA, 15.75, 21.5, 12, NA, NA, 3, 23, 15, 9.75, 25, 
+41.25, 24.25, 9.25, NA, 10.5, NA, NA, 10.25, NA, 16, 19.75, 7.5, 
+10.5, 16.75, 18.25, 7.25, 9, 11.75, 71.5, 5.25, 9.5, 46.75, 7.25, 
+NA, 2.75, 9.5, 5.25, 33, 11.75, 8, 12.75, NA, 17.25, NA, 16.75, 
+6.5, 12.5, 67, 33, 8, 25, 2, NA, NA, 4.5, 0, NA, 10, 29, 11, 
+19.75, 7.5, 22.75, NA, 12.5, NA, 16.25, 11, NA, NA, 10, NA, NA, 
+NA, NA, 16.5, 17, NA, 73.75, 8.25, 26, 12.75, 17.5, 6, 16.75, 
+15.5, 28.25, 47.25, 11.75, 19.75, 2.75, 11.75, NA, NA, 2, NA, 
+NA, 40, 17.5, 12.75, 32, 27, 18.75, 22.75, NA, 34.75, 8.25, 27.25, 
+4.5, NA, NA, 14.25, 9.5, 9, 4.5, 15.75, 7.25, 16, 3.75, NA, 52, 
+29.25, 10.25, 7.25, NA, NA, NA, 38.75, 13.5, 7.5, NA, NA, 7.75, 
+NA, 21.25, 22.75, 3, 14, 9.5, 19.5, NA, 8.25, 22, 7, 8.75, 19.25, 
+41.25, 3.5, 10.25, NA, NA, 42.25, 37.5, 31.75, 51.75, NA, 17, 
+NA, 11.75, 23.25, 5.25, NA, NA, NA, 31.75, NA, 9.5, NA, 30.5, 
+7, 3.5, 17.75, 8.75, 27.25, NA, 2, 27.5, NA, 4.5, 14, NA, 24.75, 
+6, 31, 17.25, 10, 22, NA, 9.5, 53.5, 8.75, 25.5, NA, 26, 23, 
+87.25, NA, 27.5, 17, NA, 22.5, 40.25, 11.25, NA, 35.25, NA, 53.25, 
+NA, 17.75, 38.25, NA, 38.25, NA, 6, 3.5, 5, 67.75, NA, 14.25, 
+0, NA, 25.5, 1.5, 9.75, 5.75, 24.25, NA, 16.25, 4, 9.5), age = c(47, 
+52, 32, 53, 56, 45, 45, 49, 47, 46, 64, 59, 53, 52, 52, 37, 51, 
+49, 55, 23, 59, 35, 35, 34, 32, 47, 48, 41, 49, 64, 19, 63, 36, 
+63, 46, 36, 58, 29, 39, 49, 31, 43, 55, 52, 53, 50, 44, 48, 29, 
+44, 26, 21, 34, 44, 54, 52, 18, 65, 53, 23, 62, 60, 27, 50, 41, 
+36, 33, 40, 49, 48, 60, 57, 55, 40, 64, 58, 31, 50, 56, 24, 48, 
+34, 55, 27, 48, 38, 55, 19, 49, 48, 40, 39, 45, 54, 58, 51, 61, 
+52, 43, 28, 51, 63, 31, 53, 31, 52, 33, 49, 62, 29, 47, 50, 49, 
+46, 48, 25, 47, 59, 47, 49, 52, 47, 52, 61, 41, 43, 46, 49, 40, 
+39, 42, 27, 59, 37, 53, 52, 59, 51, 52, 34, 53, 30, 52, 59, 22, 
+57, 65, 54, 44, 36, 40, 45, 53, 53, 61, 46, 52, 36, 47, 52, 44, 
+57, 50, 45, 43, 54, 25, 50, 36, 42, 30, 36, 51, 49, 54, 43, 55, 
+56, 57, 18, 54, 61, 43, 37, 30, 42, 28, 47, 48, 29, 44, 50, 54, 
+34, 56, 51, 29, 49, 53, 46, 46, 41, 49, 49, 43, 46, 61, 57, 22, 
+59, 40, 52, 54, 31, 49, 31, 39, 61, 41, 50, 56, 60, 43, 19, 46, 
+52, 44, 52, 41, 49, 55, 63, 50, 52, 41, 39, 52, 41, 25, 26, 53, 
+54, 32, 30, 54, 39, 37, 40, 33, 49, 50, 45, 56, 23, 43, 41, 48, 
+60, 59, 53, 45, 64, 42, 49, 57, 51, 48, 51, 28, 63, 65, 56, 38, 
+40, 31, 50, 20, 51, 42, 51, 52, 23, 48, 55, 47, 50, 34, 29, 37, 
+56, 39, 61, 56, 57, 58, 58, 29, 64, 49, 54, 25, 56, 44, 59, 36, 
+27, 55, 48, 31, 44, 38, 25, 37, 48, 47, 51, 45, 55, 42, 54, 41, 
+36, 43, 53, 56, 42, 38, 32, 53, 28, 53, 20, 63, 63, 61, 58, 46, 
+43, 52, 57, 48, 24, 34, 51, 35, 49, 46, 25, 37, 45, 64, 26, 50, 
+51, 30, 55, 49, 46, 56, 49, 48, 46, 55, 24, 23, 52, 49, 50, 37, 
+59, 52, 25, 54, 57, 42, 53, 62, 45, 33, 33, 51, 46, 62, 48, 55, 
+49, 43, 42, 22, 46, 41, 43, 54, 49, 36, 65, 33, 21, 49, 50, 43
+), sex = structure(c(2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+2L, 2L, 2L, 2L, 1L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 
+2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 
+2L, 2L, 2L, 1L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 
+1L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 
+2L, 2L, 2L, 1L, 1L, 2L, 1L, 2L, 2L, 1L, 2L, 1L, 2L, 2L, 2L, 1L, 
+2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 
+1L, 2L, 1L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 1L, 
+2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 
+2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 
+1L, 2L, 1L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 1L, 1L, 1L, 2L, 2L, 1L, 
+2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 1L, 2L, 
+2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 
+2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 
+2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+2L, 2L, 2L, 2L, 2L, 2L, 1L, 1L, 1L, 2L, 1L, 2L, 2L, 2L, 1L, 1L, 
+2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 1L, 2L, 2L, 2L, 2L, 
+2L, 1L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+2L, 1L, 1L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 
+2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 
+2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 1L, 
+2L, 2L, 1L, 2L, 1L, 1L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 
+2L, 2L, 2L, 2L, 2L, 2L, 2L), levels = c("Male", "Female"), class = "factor"), 
+    migraine = structure(c(2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+    2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+    2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+    2L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+    2L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+    2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 
+    2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+    2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+    1L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+    1L, 2L, 2L, 1L, 2L, 1L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 
+    2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+    2L, 2L, 1L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+    2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 
+    2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 
+    2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+    1L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+    2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 
+    2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 
+    2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+    2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+    2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 
+    2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+    2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 
+    2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+    2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 
+    2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L, 2L, 2L, 2L, 2L, 2L, 
+    2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+    2L, 2L), levels = c("No", "Yes"), class = "factor"), chronicity = c(35, 
+    8, 14, 10, 40, 27, 30, 49, 42, 3, 23, 40, 32, 40, 5, 7, 38, 
+    10, 20, 23, 54, 21, 30, 6, 5, 4, 2, 21, 40, 35, 5, 8, 15, 
+    20, 15, 4, 40, 4, 23, 24, 4, 13, 35, 30, 42, 20, 7, 38, 16, 
+    10, 5, 6, 22, 44, 40, 8, 4, 54, 15, 5, 52, 46, 10, 15, 21, 
+    22, 10, 16, 37, 30, 5, 20, 31, 8, 29, 25, 6, 6, 31, 12, 18, 
+    29, 30, 8, 6, 10, 41, 12, 30, 25, 25, 10, 10, 15, 20, 9, 
+    30, 52, 15, 14, 10, 45, 8, 5, 12, 9, 15, 6, 44, 3, 10, 35, 
+    27, 31, 41, 18, 17, 11, 42, 33, 47, 39, 52, 15, 21, 5, 40, 
+    31, 10, 5, 1, 10, 30, 4, 8, 45, 45, 34, 28, 18, 23, 6, 30, 
+    35, 5, 9, 54, 10, 12, 20, 24, 24, 30, 20, 46, 28, 46, 7, 
+    10, 32, 13, 20, 8, 5, 6, 30, 10, 7, 19, 20, 9, 3, 40, 36, 
+    20, 31, 30, 20, 20, 16, 29, 53, 8, 21, 11, 36, 19, 6, 20, 
+    17, 4, 36, 17, 18, 15, 30, 10, 33, 9, 19, 5, 20, 24, 15, 
+    35, 25, 45, 8, 6, 30, 17, 8, 15, 2, 37, 13, 27, 49, 10, 2, 
+    46, 21, 12, 4, 4, 15, 3, 47, 6, 5, 2, 44, 10, 40, 21, 3, 
+    23, 30, 19, 10, 10, 40, 18, 15, 19, 7, 26, 5, 10, 31, 37, 
+    33, 11, 5, 30, 21, 21, 2, 41, 6, 26, 3, 10, 38, 41, 20, 18, 
+    38, 3, 10, 40, 37, 4, 6, 14, 38, 4, 10, 2, 12, 10, 11, 15, 
+    31, 8, 2, 5, 21, 20, 23, 4, 36, 42, 31, 45, 41, 15, 30, 41, 
+    48, 15, 22, 30, 20, 24, 7, 42, 36, 2, 7, 25, 12, 20, 18, 
+    39, 41, 25, 2, 5, 44, 27, 4, 24, 48, 38, 31, 26, 28, 37, 
+    3, 40, 8, 52, 52, 17, 20, 25, 30, 23, 31, 28, 14, 24, 31, 
+    17, 31, 2, 16, 25, 32, 21, 10, 24, 27, 16, 32, 15, 32, 42, 
+    2, 27, 24, 30, 13, 13, 27, 8, 37, 26, 51, 5, 6, 51, 17, 21, 
+    30, 13, 20, 19, 10, 27, 3, 48, 27, 45, 25, 10, 17, 19, 32, 
+    5, 26, 16, 36, 24, 22, 21, 11, 6, 7, 4)), row.names = c(NA, 
+-401L), class = c("tbl_df", "tbl", "data.frame"))
+```
+
+# Data preparation
+
+```{r prep}
+# complete cases for the primary endpoint
+df_cc <- df[!is.na(df$pk5), ]
+
+# average daily Likert score rounded to integer categories (0-5)
+# pk1 and pk5 are four-week sums of four daily ratings, so dividing by 7 gives
+# the approximate average daily score
+df$pk5_cat <- cut(df$pk5 / 7, breaks = c(-Inf, 1:5, Inf),
+                  labels = as.character(0:5), ordered_result = TRUE)
+df$pk1_cat <- cut(df$pk1 / 7, breaks = c(-Inf, 1:5, Inf),
+                  labels = as.character(0:5), ordered_result = TRUE)
+```
+
+# Descriptive plot
+
+```{r plot, fig.width = 8, fig.height = 4}
+xyplot(pk5 ~ pk1 | group, data = df,
+       xlab = "Baseline headache severity score (pk1)",
+       ylab = "12-month headache severity score (pk5)")
+```
+
+# Models
+
+We fit a sequence of six transformation models (`m1`-`m6`), progressively increasing in complexity and flexibility:
+
+1.  `m1`: unadjusted univariate transformation model assuming normality of the outcome; complete case analysis,
+2.  `m2`: **multivariate** transformation model (jointly modeling the outcome $Y$ and covariates $\mathbf{X}$) assuming normality of the outcome; adjusts for the **prognostic effects** of the baseline covariates (assumes no interactions between treatment and covariates); complete case analysis,
+3.  `m3`: multivariate transformation model assuming normality of the outcome; adjusts for both prognostic and **predictive** (treatment-covariate interaction) effects; complete case analysis,
+4.  `m4`: multivariate transformation model assuming normality of the outcome; adjusts for both prognostic and predictive effects; uses the **full dataset** (rows of participants with missing follow-up data are kept and contribute to estimation of the correlation matrix),
+5.  `m5`: multivariate transformation model **not assuming normality of the outcome**; adjusts for both prognostic and predictive effects; uses the full dataset,
+6.  `m6`: multivariate transformation model **treating the outcome as ordinal**; adjusts for both prognostic and predictive effects; uses the full dataset,
+
+In each model, the primary quantity of interest is the marginal treatment effect $\tau$ (the coefficient labeled `groupAcupuncture`), which measures the shift in the distribution of the 12-month headache score for the acupuncture group relative to usual care on the latent probit scale. All models use a probit link so that $\tau$ has a Cohen's $d$ interpretation in models assuming normality of the outcome (`m1`-`m4`), and a latent Cohen's $d$ interpretation in models that relax this assumption (`m5`, `m6`).
+
+## Reference analysis: normal linear regression
+
+The main analysis of the original trial used an ANCOVA model adjusting for the baseline headache score and minimization covariates. This corresponds to a normal linear model with adjustment for prognostic covariate effects but without treatment-covariate interactions (predictive effects). The analysis was restricted to the 301 complete cases.
+
+```{r lm}
+m_original <- lm(pk5 ~ group + pk1 + age + sex + migraine + chronicity,
+                 data = df_cc)
+```
+
+```{r lm-tau}
+# adjusted mean difference (Acupuncture minus Control)
+tau_original    <- coef(m_original)["groupAcupuncture"]
+se_tau_original <- sqrt(diag(vcov(m_original)))["groupAcupuncture"]
+ci_tau_original <- confint(m_original, parm = "groupAcupuncture")
+
+cat(sprintf("Adjusted marginal mean difference: %.2f  SE %.2f  95%% CI [%.2f, %.2f]\n",
+            tau_original, se_tau_original,
+            ci_tau_original[1], ci_tau_original[2]))
+
+# hypothesis test via multcomp for consistency with the transformation model results below
+summary(glht(m_original, linfct = "groupAcupuncture = 0"))
+```
+
+## Model m1: Unadjusted transformation model
+
+Model `m1` is an unadjusted transformation model with a probit link and a linear transformation function for the outcome:
+
+$$
+F_Y(y | w) = \Phi(h(y) - \tau\,w) = \Phi(\vartheta_1 + \vartheta_2\,y - \tau\,w)).
+$$
+
+Constraining the transformation function to be linear and using a probit link is equivalent to assuming that the outcome follows a normal distribution with:
+
+$$
+Y \mid W \sim \mathrm{N}(-(\vartheta_1 - \tau\,w)\,\vartheta_2^{-1},\, \vartheta_2^{-2}).
+$$ 
+
+Therefore, this model corresponds to a normal linear model without any covariate adjustment. The marginal treatment effect $\tau$ has a Cohen's $d$ interpretation: it represents the standardized mean difference in headache score between the acupuncture and control groups.
+
+Dividing $\tau$ by $\vartheta_2$ (the inverse of the standard deviation) - in other words, multiplying Cohen's $d$ by the estimated residual standard deviation - recovers the unadjusted mean difference on the original headache score scale:
+
+$$
+\text{Unadjusted mean difference} = \frac{\tau}{\vartheta_2}.
+$$
+
+```{r lm-tram}
+# marginal model for pk5, used again inside the multivariate models below
+# Lm() = probit link with linear transformation function
+mPk5_cc <- Lm(pk5 ~ group, data = df_cc)
+```
+
+```{r lm-tram-tau}
+# negative tau means the acupuncture group has a lower (better) transformed score
+tau_m1    <- mPk5_cc$coef["groupAcupuncture"]
+se_tau_m1 <- sqrt(diag(vcov(mPk5_cc)))["groupAcupuncture"]
+ci_tau_m1 <- confint(mPk5_cc, parm = "groupAcupuncture")
+
+# unadjusted marginal mean difference on the original pk5 scale = tau / theta_2
+meandif_m1 <- tau_m1 / mPk5_cc$coef["pk5"]
+
+cat(sprintf("tau = %.3f  SE %.3f  95%% CI [%.3f, %.3f]\n",
+            tau_m1, se_tau_m1, ci_tau_m1[1], ci_tau_m1[2]))
+cat(sprintf("Unadjusted marginal mean difference: %.2f\n", meandif_m1))
+
+summary(glht(mPk5_cc, linfct = "groupAcupuncture = 0"))
+```
+
+## Model m2: Prognostic adjustment
+
+Model `m2` fits a multivariate transformation model, jointly modeling all six variables (`pk1`, `age`, `sex`, `migraine`, `chronicity`, `pk5`) using the nonparanormal likelihood.
+
+The copula structure is assumed to be constant across treatment arms, meaning we only allow for prognostic effects, but no predictive effects. In other words, the latent correlation between the outcome and each covariate does not vary by treatment assignment. This is done by specifying `formula = ~ 1` inside the `mmlt()` function.
+
+This is the closest transformation-model analogue of the original ANCOVA analysis.
+
+```{r mmlt2-marginals}
+# univariate transformation models for each baseline covariate; fitted unconditionally
+# since covariate distributions do not depend on treatment assignment by randomization.
+# BoxCox() is used for continuous covariates: it estimates a flexible transformation
+# without assuming normality. Polr() with method = "probit" is used for binary covariates.
+# this does not impose any distributional assumptions on the covariates.
+mPk1_cc        <- BoxCox(pk1 ~ 1,        data = df_cc)
+mAge_cc        <- BoxCox(age ~ 1,        data = df_cc)
+mSex_cc        <- Polr(sex ~ 1,          data = df_cc, method = "probit")
+mMigraine_cc   <- Polr(migraine ~ 1,     data = df_cc, method = "probit")
+mChronicity_cc <- BoxCox(chronicity ~ 1, data = df_cc)
+# only the outcome model includes a treatment effect
+```
+
+```{r mmlt2-fit}
+# fit the joint model of the outcome and covariates
+# note that the outcome model must be passed last to mmlt()
+m_mmlt2 <- mmlt(mPk1_cc, mAge_cc, mSex_cc, mMigraine_cc, mChronicity_cc, 
+                mPk5_cc, # <-- outcome model, fitted in the previous section;
+                         #     since it uses Lm(), normality is assumed
+                formula = ~ 1, # <-- common copula structure across treatment arms
+                data = df_cc)
+```
+
+```{r mmlt2-tau}
+tau_m2    <- m_mmlt2$coef["pk5.groupAcupuncture"]
+se_tau_m2 <- sqrt(diag(vcov(m_mmlt2)))["pk5.groupAcupuncture"]
+ci_tau_m2 <- confint(m_mmlt2, parm = "pk5.groupAcupuncture")
+
+# adjusted marginal mean difference on the pk5 scale
+meandif_m2 <- tau_m2 / m_mmlt2$coef["pk5.pk5"]
+
+cat(sprintf("tau = %.3f  SE %.3f  95%% CI [%.3f, %.3f]\n",
+            tau_m2, se_tau_m2, ci_tau_m2[1], ci_tau_m2[2]))
+cat(sprintf("Adjusted marginal mean difference: %.2f\n", meandif_m2))
+
+summary(glht(m_mmlt2,
+             linfct = "pk5.groupAcupuncture = 0",
+             vcov.  = vcov(m_mmlt2),
+             coef.  = m_mmlt2$coef))
+```
+
+This model jointly estimates the marginal treatment effect and the correlation structure among the outcome and covariates. These copula parameters can be converted to different scales:
+
+-   $\mathbf{\Sigma}$: the correlation matrix; contains the latent correlations between the outcome and covariates. This is the most intuitive scale on which to interpret the strength of association between the outcome and covariates, but this is not the scale on which the parameters are estimated and tested.
+-   $\mathbf{\Lambda}$: the unconstrained parametrization of the inverse Cholesky factor of the correlation matrix; this is the scale on which the parameters are estimated, and therefore these parameters are used for hypothesis testing of prognostic effects.
+-   $\mathbf{\Omega}$: the standardized inverse Cholesky factor of the correlation matrix; this is a reparameterization of $\mathbf{\Lambda}$ that is better suited for ranking covariates by prognostic importance.
+
+```{r mmlt2-lambda}
+xn <- c("pk1", "age", "sex", "migraine", "chronicity")
+
+# lambda: unconstrained prognostic copula parameters, used for hypothesis testing 
+# (H0: lambda_j = 0), entries correspond to the row of Lambda for the pk5 variable
+lam_m2 <- m_mmlt2$coef[paste0("pk5.", xn, ".(Intercept)")]
+cat("lambda parameters, used for testing:\n")
+print(round(lam_m2, 3))
+
+# joint test of all lambda coefficients
+summary(glht(m_mmlt2,
+             linfct = paste0("`", names(lam_m2), "` = 0"),
+             vcov.  = vcov(m_mmlt2),
+             coef.  = m_mmlt2$coef))
+```
+
+There is only evidence of a prognostic effect of the baseline headache score (`pk1`). 
+
+```{r mmlt2-omega}
+# omega: entries of the inverse Cholesky factor Omega for the pk5 row, used for ranking
+# covariates by prognostic importance
+omega0_m2 <- as.array(
+  coef(m_mmlt2, type = "Lambda",
+       newdata = data.frame(group = gl(2, 1, labels = levels(df$group))))
+)[, , 1]["pk5", ][-6]
+
+cat("omega parameters, used for ranking, sorted by |value|:\n")
+print(round(omega0_m2[order(abs(omega0_m2), decreasing = TRUE)], 3))
+```
+
+Again, we see that the baseline headache score has the strongest association with the outcome.
+
+```{r mmlt2-correlation}
+# sigma: entries of correlation matrix pk5 row, used for interpretation of 
+# strength of association between covariates and outcome
+sigma0_m2 <- as.array(
+  coef(m_mmlt2, type = "Sigma",
+       newdata = data.frame(group = gl(2, 1, labels = levels(df$group))))
+)[, , 1]["pk5", ][-6]
+
+cat("sigma/latent correlation parameters:\n")
+print(round(sigma0_m2, 3))
+```
+
+The latent correlation between the baseline headache score and the 12-month outcome is estimated to be around 0.66 in both treatment groups. Notice that the signs of the latent correlation parameters are the opposite of the signs of the $\lambda$ parameters.
+
+## Model m3: Prognostic and predictive adjustment
+
+Model `m3` extends `m2` by allowing the copula structure to vary between treatment arms, specified via the `formula = ~ 1 + group` argument inside the `mmlt` function. 
+
+Again, the copula parameters can be converted to different scales, but these time they can vary by treatment $W$:
+
+-   $\mathbf{\Sigma(w)}$: the treatment-dependent correlation matrix.
+-   $\mathbf{\Lambda(w)}$: the treatment-dependent unconstrained parametrization of the inverse Cholesky factor of the correlation matrix; used for hypothesis testing of prognostic and predictive effects. The prognostic effects are denoted by $\lambda$, and the predictive effects by $\gamma$.
+-   $\mathbf{\Omega(w)}$: the treatment-dependent standardized inverse Cholesky factor of the correlation matrix; used for ranking covariates by prognostic and predictive importance. Ranking by prognostic importance is based on $\mathbf{\Omega(0)}$ (entries for the control arm), while ranking by predictive importance is based on $\mathbf{\Omega(1)}$ (the difference in the entries between the acupuncture and control arms).
+
+By randomization, the correlation structure between the baseline covariates themselves cannot be affected by treatment assignment. This restriction is imposed through the `fixed` argument.
+
+```{r mmlt3-fixed}
+# fixed_vec: names of the predictive parameters that correspond to covariate-covariate
+# correlations, which are set to zero; only outcome-covariate correlations are
+# allowed to change by treatment arms.
+grp_active <- setdiff(levels(df_cc$group), levels(df_cc$group)[1])
+m_proto <- mmlt(mPk1_cc, mAge_cc, mSex_cc, mMigraine_cc, mChronicity_cc, mPk5_cc,
+                formula = ~ 1 + group, data = df_cc, fit = "none")
+                                                     # ^^ model is not fit
+rx_nopk5 <- unlist(lapply(grp_active, function(g) {
+  grp_terms <- grep(paste0("\\.group", g, "$"), m_proto$parnames, value = TRUE)
+  grp_terms[!grepl("(^|\\.)pk5(\\.|$)", grp_terms)]
+}))
+fixed_vec <- if (length(rx_nopk5)) setNames(rep(0, length(rx_nopk5)), rx_nopk5) else NULL
+```
+
+```{r mmlt3-fit}
+# fit joint model; the outcome model must be passed last to mmlt()
+m_mmlt3 <- mmlt(mPk1_cc, mAge_cc, mSex_cc, mMigraine_cc, mChronicity_cc, 
+                # ^^^ covariate models, fitted in the previous section
+                mPk5_cc, # <-- outcome model, fitted in the previous section; 
+                         #     since it uses Lm(), normality is assumed
+                formula = ~ 1 + group, # <-- allows the copula parameters to 
+                                       #     differ by treatment arms
+                data = df_cc, fixed = fixed_vec)
+```
+
+```{r mmlt3-tau}
+tau_m3    <- m_mmlt3$coef["pk5.groupAcupuncture"]
+se_tau_m3 <- sqrt(diag(vcov(m_mmlt3)))["pk5.groupAcupuncture"]
+ci_tau_m3 <- confint(m_mmlt3, parm = "pk5.groupAcupuncture")
+
+meandif_m3 <- tau_m3 / m_mmlt3$coef["pk5.pk5"]
+
+cat(sprintf("tau = %.3f  SE %.3f  95%% CI [%.3f, %.3f]\n",
+            tau_m3, se_tau_m3, ci_tau_m3[1], ci_tau_m3[2]))
+cat(sprintf("Adjusted marginal mean difference: %.2f\n", meandif_m3))
+
+summary(glht(m_mmlt3,
+             linfct = "pk5.groupAcupuncture = 0",
+             vcov.  = vcov(m_mmlt3),
+             coef.  = m_mmlt3$coef))
+```
+
+```{r mmlt3-lambda}
+# lambda: unconstrained prognostic copula parameters, used for hypothesis testing
+# (H0: lambda_j = 0), entries correspond to the row of Lambda(0) for the pk5 variable;
+# in other words these are the parameters for the control group
+lam_m3 <- m_mmlt3$coef[paste0("pk5.", xn, ".(Intercept)")]
+print(round(lam_m3, 3))
+
+summary(glht(m_mmlt3,
+             linfct = paste0("`", names(lam_m3), "` = 0"),
+             vcov.  = vcov(m_mmlt3),
+             coef.  = m_mmlt3$coef))
+```
+
+Again, we see evidence of a prognostic effect of the baseline headache score, but not of the other covariates.
+
+```{r mmlt3-gamma}
+# gamma: unconstrained prognostic copula parameters, used for hypothesis testing
+# (H0: gamma_j = 0), entries correspond to the difference between Lambda(1) and 
+# Lambda(0) for the pk5 variable; in other words these are the difference in
+# the parameters between the acupunture and control groups
+gam_m3 <- m_mmlt3$coef[paste0("pk5.", xn, ".groupAcupuncture")]
+print(round(gam_m3, 3))
+
+summary(glht(m_mmlt3,
+             linfct = paste0(names(gam_m3), " = 0"),
+             vcov.  = vcov(m_mmlt3),
+             coef.  = m_mmlt3$coef))
+```
+
+We do not find strong evidence of any predictive effects, meaning that there is no evidence that the correlation structure between the outcome and covariates differs between treatment arms. 
+
+```{r mmlt3-omega}
+nd_grp <- data.frame(group = gl(2, 1, labels = levels(df$group)))
+omega_m3 <- as.array(coef(m_mmlt3, type = "Lambda", newdata = nd_grp))
+
+# omega: inverse Cholesky factor entries for the pk5 row, used for ranking prognostic
+# (omega0) and predictive (delta omega) importance of each covariate
+omega0_m3 <- omega_m3[, , 1]["pk5", ][-6]
+omegad_m3 <- omega_m3[, , 2]["pk5", ][-6] - omega0_m3
+
+cat("omega parameters (control), used for prognostic ranking, sorted by |value|:\n")
+print(round(omega0_m3[order(abs(omega0_m3), decreasing = TRUE)], 3))
+cat("difference in omega parameters (acupuncture - control), used for predictive ranking, sorted by |value|:\n")
+print(round(omegad_m3[order(abs(omegad_m3), decreasing = TRUE)], 3))
+```
+The baseline headache score is ranked as the most prognostic and predictive covariate. 
+
+```{r mmlt3-correlation}
+# sigma: entries of correlation matrix pk5 row, used for interpretation of 
+# strength of association between covariates and outcome (which can change
+# by treatment arm)
+sigma0_m3 <- as.array(
+    coef(m_mmlt3, type = "Sigma",
+         newdata = data.frame(group = gl(2, 1, labels = levels(df$group))))
+)[, , 1]["pk5", ][-6]
+
+sigma1_m3 <- as.array(
+    coef(m_mmlt3, type = "Sigma",
+         newdata = data.frame(group = gl(2, 1, labels = levels(df$group))))
+)[, , 2]["pk5", ][-6]
+
+cat("sigma/latent correlation parameters (control):\n")
+print(round(sigma0_m3, 3))
+
+cat("sigma/latent correlation parameters (acupuncture):\n")
+print(round(sigma1_m3, 3))
+```
+The latent correlation between the baseline and follow-up headache score is stronger in the control group than in the acupuncture group.
+
+## Model m4: Including all observations
+
+Model `m4` uses all 401 randomized patients by specifying `na.action = na.pass`, which integrates missing follow-up outcomes out of the joint likelihood using the baseline covariate information from participants with missing `pk5`. The model structure is otherwise identical to `m3`.
+
+```{r mmlt4-marginals}
+# outcome model fitted with all observations, including those with missing pk5; 
+# the missing outcomes do not contribute to the likelihood. Lm() assumes normality 
+# of the outcome.
+mPk5        <- Lm(pk5 ~ group,        data = df, na.action = na.pass)
+# covariate unconditional models fitted with all observations. BoxCox() is used
+# for continuous covariates: it estimates a flexible transformation without assuming 
+# normality (by default uses probit link). Polr() with method = "probit" is used 
+# for binary covariates. this does not impose any distributional assumptions on 
+# the covariates.
+mPk1        <- BoxCox(pk1 ~ 1,        data = df, na.action = na.pass)
+mAge        <- BoxCox(age ~ 1,        data = df, na.action = na.pass)
+mSex        <- Polr(sex ~ 1,          data = df, na.action = na.pass, method = "probit")
+mMigraine   <- Polr(migraine ~ 1,     data = df, na.action = na.pass, method = "probit")
+mChronicity <- BoxCox(chronicity ~ 1, data = df, na.action = na.pass)
+```
+
+```{r mmlt4-fit}
+# fit joint model; the outcome model must be passed last to mmlt()
+m_mmlt4 <- mmlt(mPk1, mAge, mSex, mMigraine, mChronicity, # <-- covariate models
+                mPk5, # <-- outcome model
+                formula = ~ 1 + group, data = df, fixed = fixed_vec)
+```
+
+```{r mmlt4-results}
+tau_m4    <- m_mmlt4$coef["pk5.groupAcupuncture"]
+se_tau_m4 <- sqrt(diag(vcov(m_mmlt4)))["pk5.groupAcupuncture"]
+ci_tau_m4 <- confint(m_mmlt4, parm = "pk5.groupAcupuncture")
+meandif_m4 <- tau_m4 / m_mmlt4$coef["pk5.pk5"]
+
+cat(sprintf("tau = %.3f  SE %.3f  95%% CI [%.3f, %.3f]\n",
+            tau_m4, se_tau_m4, ci_tau_m4[1], ci_tau_m4[2]))
+cat(sprintf("Adjusted marginal mean difference: %.2f\n", meandif_m4))
+
+summary(glht(m_mmlt4,
+             linfct = "pk5.groupAcupuncture = 0",
+             vcov.  = vcov(m_mmlt4),
+             coef.  = m_mmlt4$coef))
+```
+
+```{r mmlt4-lambda-gamma}
+# lambda: unconstrained prognostic copula parameters, used for hypothesis testing
+lam_m4 <- m_mmlt4$coef[paste0("pk5.", xn, ".(Intercept)")]
+cat("lambda (prognostic) parameters, used for testing:\n"); print(round(lam_m4, 3))
+summary(glht(m_mmlt4,
+             linfct = paste0("`", names(lam_m4), "` = 0"),
+             vcov.  = vcov(m_mmlt4),
+             coef.  = m_mmlt4$coef))
+
+# gamma: unconstrained predictive copula parameters, used for hypothesis testing
+gam_m4 <- m_mmlt4$coef[paste0("pk5.", xn, ".groupAcupuncture")]
+cat("gamma (predictive) parameters, used for testing:\n");  print(round(gam_m4, 3))
+summary(glht(m_mmlt4,
+             linfct = paste0("`", names(gam_m4), "` = 0"),
+             vcov.  = vcov(m_mmlt4),
+             coef.  = m_mmlt4$coef))
+```
+
+Again, we only find evidence of a prognostic effect of the baseline headache score, but not of a predictive effect. 
+
+## Model m5: Relaxing the normality assumption
+
+Model `m5` relaxes the normality assumption for the outcome by replacing the linear transformation function with a flexible function fitted via `BoxCox()`. Because the headache score is bounded and strictly positive, the normality assumption may be unrealistic. The marginal treatment effect $\tau$ remains a probit-scale shift, but because the outcome transformation is no longer linear, $\tau$ applies only on the latent standard normal scale and no longer corresponds to Cohen's $d$ on the original headache score scale. Therefore, a mean difference on the original scale cannot be recovered directly from $\tau$ in this model.
+
+```{r mmlt5-fit}
+# only the outcome model includes a treatment effect; covariate marginals from m4 are reused
+mPk5_nonlin <- BoxCox(pk5 ~ group, data = df, na.action = na.pass)
+# the outcome model must be passed last to mmlt()
+m_mmlt5 <- mmlt(mPk1, mAge, mSex, mMigraine, mChronicity, # <-- covariate models, 
+                                                          # fitted in the previous section
+                mPk5_nonlin, # <-- outcome model with flexible transformation function
+                formula = ~ 1 + group, data = df, fixed = fixed_vec)
+```
+
+```{r mmlt5-tau}
+tau_m5    <- m_mmlt5$coef["pk5.groupAcupuncture"]
+se_tau_m5 <- sqrt(diag(vcov(m_mmlt5)))["pk5.groupAcupuncture"]
+ci_tau_m5 <- confint(m_mmlt5, parm = "pk5.groupAcupuncture")
+
+cat(sprintf("tau = %.3f  SE %.3f  95%% CI [%.3f, %.3f]\n",
+            tau_m5, se_tau_m5, ci_tau_m5[1], ci_tau_m5[2]))
+
+summary(glht(m_mmlt5,
+             linfct = "pk5.groupAcupuncture = 0",
+             vcov.  = vcov(m_mmlt5),
+             coef.  = m_mmlt5$coef))
+```
+
+```{r mmlt5-lambda-gamma}
+# lambda: unconstrained prognostic copula parameters, used for hypothesis testing
+lam_m5 <- m_mmlt5$coef[paste0("pk5.", xn, ".(Intercept)")]
+cat("lambda (prognostic) parameters, used for testing:\n"); print(round(lam_m5, 3))
+summary(glht(m_mmlt5,
+             linfct = paste0("`", names(lam_m5), "` = 0"),
+             vcov.  = vcov(m_mmlt5),
+             coef.  = m_mmlt5$coef))
+
+# gamma: unconstrained predictive copula parameters, used for hypothesis testing
+gam_m5 <- m_mmlt5$coef[paste0("pk5.", xn, ".groupAcupuncture")]
+cat("gamma (predictive) parameters, used for testing:\n");  print(round(gam_m5, 3))
+summary(glht(m_mmlt5,
+             linfct = paste0("`", names(gam_m5), "` = 0"),
+             vcov.  = vcov(m_mmlt5),
+             coef.  = m_mmlt5$coef))
+```
+
+By relaxing the normality assumption, we are able to find both a prognostic and predictive effect of the baseline headache score. This could suggest that the normality assumption may have been too restrictive, as it imposes a more linear relationship between the baseline and follow-up headache scores.
+
+To visualize the relationship between the baseline and follow-up headache scores, we can derive and look at the conditional density of the 12-month score given the baseline score and treatment group. 
+
+which can be obtained from the bivariate marginal of `pk5` and `pk1` in model `m5`. This shows how the distribution of the 12-month score changes with baseline severity, separately by arm.
+
+```{r mmlt5-conditional, fig.width = 10, fig.height = 5}
+# conditional density f(pk5 | pk1, group) can be obtained by (1) marginalizing
+# the joint model f(pk5, pk1, age, sex, migraine, chronicity | group) of all variables 
+# except pk1 and pk5, then (2) predicting the following densities: f(pk5, pk1 | group) 
+# and f(pk1) --> f(pk5 | pk1, group) = f(pk5, pk1 | group) / f(pk1).
+# to make these predictions, pk5 has to be included as the first variable.
+
+m5 <- mmlt(mPk5_nonlin, mPk1, mAge, mChronicity, mSex, mMigraine,
+           formula = ~ 1 + group, data = df, na.action = na.pass)
+class(m5) <- c("TH", class(m5))
+cf <- coef(m5)[grep("^pk", names(coef(m5)))]
+m50 <- mmlt(mPk5_nonlin, mPk1, formula = ~ 1 + group, data = df, fixed = cf)
+N  <- 100
+nd <- do.call("expand.grid", c(mkgrid(mPk5_nonlin, n = N), mkgrid(mPk1, n = N)))
+nd$f51 <- predict(m50, newdata = nd, type = "density")
+nd$f1  <- predict(m50, newdata = nd, type = "density", margins = 2)
+levelplot(I(f51 / f1) ~ pk1 + pk5 | group, data = nd,
+          xlab = "Baseline headache severity score (pk1)", ylab = "12-month headache severity score (pk5)",
+          main  = "Derived conditional density  f(pk5 | pk1, group)",
+          panel = function(..., subscripts) {
+            gr <- unique(nd[subscripts, "group"])
+            d  <- subset(df_cc, group == gr)
+            panel.levelplot(..., subscripts = subscripts)
+            panel.xyplot(d$pk1, d$pk5, pch = 19, col = "black", alpha = 0.3)
+          })
+```
+
+We can see a more flat relationship between the baseline and follow-up scores in the acupuncture group than in the control group. As the baseline score increases, the discrepency between the two groups becomes more pronounced, meaning that the conditional effect of acupuncture gets larger with higher baseline severity. This is consistent with the estimated latent correlation parameters:
+
+```{r mmlt5-correlation}
+# sigma: entries of correlation matrix pk5 row, used for interpretation of 
+# strength of association between covariates and outcome (which can change
+# by treatment arm)
+sigma0_m5 <- as.array(
+    coef(m_mmlt5, type = "Sigma",
+         newdata = data.frame(group = gl(2, 1, labels = levels(df$group))))
+)[, , 1]["pk5", ][-6]
+
+sigma1_m5 <- as.array(
+    coef(m_mmlt5, type = "Sigma",
+         newdata = data.frame(group = gl(2, 1, labels = levels(df$group))))
+)[, , 2]["pk5", ][-6]
+
+cat("sigma/latent correlation parameters (control):\n")
+print(round(sigma0_m5, 3))
+
+cat("sigma/latent correlation parameters (acupuncture):\n")
+print(round(sigma1_m5, 3))
+```
+
+## Model m6: Ordinal outcome
+
+Model `m6` treats the endpoint as ordinal by rounding the headache score to a daily average Likert score (0-5), fitted via `Polr()` with a probit link. The marginal treatment effect $\tau$ represents a mean shift in probit score for the probability of observing a worse outcome, comparable in interpretation to a latent Cohen's $d$.
+
+```{r mmlt6-fit}
+# only the outcome model includes a treatment effect; covariate marginals from m4 are reused
+# (except pk1, which is now also treated as ordinal)
+mPk5_cat <- Polr(pk5_cat ~ group, data = df, method = "probit", na.action = na.pass)
+mPk1_cat <- Polr(pk1_cat ~ 1,     data = df, method = "probit", na.action = na.pass)
+
+# adjust fixed_vec parameter names for the categorical pk1 variable
+fixed_vec_cat <- fixed_vec
+names(fixed_vec_cat) <- gsub("(^|\\.)pk1(\\.|$)", "\\1pk1_cat\\2", names(fixed_vec_cat))
+
+# the outcome model must be passed last to mmlt()
+m_mmlt6 <- mmlt(mPk1_cat, mAge, mSex, mMigraine, mChronicity, # <-- covariate models
+                mPk5_cat, # <-- outcome model
+                formula = ~ 1 + group, data = df, fixed = fixed_vec_cat)
+```
+
+```{r mmlt6-tau}
+tau_m6    <- m_mmlt6$coef["pk5_cat.groupAcupuncture"]
+se_tau_m6 <- sqrt(diag(vcov(m_mmlt6)))["pk5_cat.groupAcupuncture"]
+ci_tau_m6 <- confint(m_mmlt6, parm = "pk5_cat.groupAcupuncture")
+
+cat(sprintf("tau = %.3f  SE %.3f  95%% CI [%.3f, %.3f]\n",
+            tau_m6, se_tau_m6, ci_tau_m6[1], ci_tau_m6[2]))
+
+summary(glht(m_mmlt6,
+             linfct = "pk5_cat.groupAcupuncture = 0",
+             vcov.  = vcov(m_mmlt6),
+             coef.  = m_mmlt6$coef))
+```
+
+# Summary
+
+```{r summary-table, echo = FALSE}
+results <- data.frame(
+  Model = c(
+    "m1: Unadjusted, assumes normality, complete case",
+    "m2: Adjusted (prognostic-only), assumes normality, complete case",
+    "m3: Adjusted (prognostic and predictive), assumes normality, complete case",
+    "m4: Adjusted (prognostic and predictive), assumes normality, full dataset",
+    "m5: Adjusted (prognostic and predictive), does not assume normality, full dataset",
+    "m6: Adjusted (prognostic and predictive), ordinal outcome, full dataset"
+  ),
+  tau = c(tau_m1, tau_m2, tau_m3, tau_m4, tau_m5, tau_m6),
+  SE  = c(se_tau_m1, se_tau_m2, se_tau_m3, se_tau_m4, se_tau_m5, se_tau_m6)
+)
+knitr::kable(results, digits = 3,
+             caption = "Marginal treatment effect estimates across all models.")
+```
+
+# Session info
+
+```{r session}
+sessionInfo()
+```
